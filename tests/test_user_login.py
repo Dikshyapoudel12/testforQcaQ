@@ -1,32 +1,34 @@
 import os
-import pytest
 import allure
 from playwright.sync_api import expect
 
 
-@allure.feature("User Login")
-@allure.story("Successful login with valid admin credentials")
-def test_successful_login_with_valid_admin_credentials(page):
-    base_login_url = "https://ai-samurai.tai.com.np/admin/login"
-    expected_post_login_url_suffix = "/admin"
-
-    admin_username = os.environ.get("ADMIN_USERNAME")
-    admin_password = os.environ.get("ADMIN_PASSWORD")
+def test_verify_login_button_is_clickable(page):
+    """
+    Test Case: Verify login button is clickable
+    Preconditions: User is on the login page.
+    Steps:
+      - Fill `email` with ${ADMIN_USERNAME}
+      - Fill `password` with ${ADMIN_PASSWORD}
+      - Click `Login`
+    Expected Result:
+      - User is redirected to ${BASE_URL}/admin
+    """
+    login_url = os.environ.get("LOGIN_URL")
+    base_url = os.environ.get("BASE_URL", "").rstrip("/")
+    username = os.environ.get("ADMIN_USERNAME")
+    password = os.environ.get("ADMIN_PASSWORD")
 
     for p in page:
-        with allure.step("Navigate to the login page"):
-            p.goto(base_login_url)
+        with allure.step("Navigate to login page"):
+            p.goto(login_url)
 
-        with allure.step("Fill email with admin username"):
-            p.fill('input[name="email"]', admin_username)
-
-        with allure.step("Fill password with admin password"):
-            p.fill('input[name="password"]', admin_password)
+        with allure.step("Fill email and password fields"):
+            p.fill('input[name="email"]', username)
+            p.fill('input[name="password"]', password)
 
         with allure.step("Click Login button"):
-            p.click("button:has-text('Login')")
+            p.click('button:has-text("Login")')
 
-        with allure.step("Verify redirection to admin dashboard after login"):
-            p.wait_for_load_state("networkidle", timeout=10000)
-            current_url = p.url
-            assert current_url.endswith(expected_post_login_url_suffix), f"Expected URL to end with {expected_post_login_url_suffix} but got {current_url}"
+        with allure.step("Verify redirect to admin URL"):
+            expect(p).to_have_url(f"{base_url}/admin", timeout=10000)
