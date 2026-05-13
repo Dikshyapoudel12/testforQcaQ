@@ -850,13 +850,17 @@ def contexts(browsers, request, tmp_path):
     contexts = []
     video_dirs = []
     base_video_dir = tmp_path / "videos"
+    artifacts_level = os.getenv("QCAQ_ARTIFACTS_LEVEL", "basic")
 
     for name, browser in browsers:
-        browser_video_dir = base_video_dir / name
-        browser_video_dir.mkdir(parents=True, exist_ok=True)
-        video_dirs.append(browser_video_dir)
+        context_kwargs = {}
+        if artifacts_level != "basic":
+            browser_video_dir = base_video_dir / name
+            browser_video_dir.mkdir(parents=True, exist_ok=True)
+            video_dirs.append(browser_video_dir)
+            context_kwargs["record_video_dir"] = browser_video_dir
 
-        ctx = browser.new_context(record_video_dir=browser_video_dir)
+        ctx = browser.new_context(**context_kwargs)
         ctx.set_default_timeout(DEFAULT_TIMEOUT)
         contexts.append((name, ctx))
 
@@ -952,6 +956,9 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
 
+    if report.when == "call" and getattr(report, "failed", False):
+        setattr(item, "_qcaq_test_failed", True)
+
     if report.when == "call" and report.failed:
         pages = item.funcargs.get("pages")
         if not pages:
@@ -1020,11 +1027,21 @@ def pytest_runtest_teardown(item, nextitem):
     yield
 
     video_dirs = getattr(item, "_qcaq_video_dirs", [])
+    test_failed = getattr(item, "_qcaq_test_failed", False)
+    artifacts_level = os.getenv("QCAQ_ARTIFACTS_LEVEL", "basic")
+
     for video_dir in video_dirs:
         if not video_dir.exists():
             continue
 
         for video_file in sorted(video_dir.glob("*.webm")):
+            if artifacts_level == "limited_video" and not test_failed:
+                try:
+                    video_file.unlink()
+                except Exception:
+                    pass
+                continue
+
             try:
                 allure.attach.file(
                     str(video_file),
