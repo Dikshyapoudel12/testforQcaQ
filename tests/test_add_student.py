@@ -36,8 +36,8 @@ def test_successful_addition_of_student_with_valid_inputs(page):
         # Prepare data
         last_name = "Suzuki"
         first_name = "Taro"
-        last_name_katakana = "スズキ"
-        first_name_katakana = "タロウ"
+        last_name_katakana = "\u30B9\u30BA\u30AD"
+        first_name_katakana = "\u30BF\u30ED\u30A6"
         phone = generate_random_phone()
         email = generate_random_email()
         postal_code = f"{random.randint(10000, 99999)}"
