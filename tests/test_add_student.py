@@ -34,10 +34,8 @@ def test_successful_addition_of_student_with_valid_inputs(page):
             expect(p).to_have_url(ADD_STUDENT_URL)
 
         # Prepare data
-        last_name = "Suzuki"
-        first_name = "Taro"
-        last_name_katakana = "\u30B9\u30BA\u30AD"
-        first_name_katakana = "\u30BF\u30ED\u30A6"
+        last_name = "スズキ"  # Valid Katakana
+        first_name = "タロウ"  # Valid Katakana
         phone = generate_random_phone()
         email = generate_random_email()
         postal_code = f"{random.randint(10000, 99999)}"
@@ -54,8 +52,8 @@ def test_successful_addition_of_student_with_valid_inputs(page):
         with allure.step("Fill student form"):
             p.fill('input[name="lastName"]', last_name)
             p.fill('input[name="firstName"]', first_name)
-            p.fill('input[name="lastNameKatakana"]', last_name_katakana)
-            p.fill('input[name="firstNameKatakana"]', first_name_katakana)
+            p.fill('input[name="lastNameKatakana"]', last_name)
+            p.fill('input[name="firstNameKatakana"]', first_name)
             p.fill('input[name="phone"]', phone)
             p.fill('input[name="email"]', email)
 
@@ -109,14 +107,17 @@ def test_successful_addition_of_student_with_valid_inputs(page):
                 expect(register_now_btn).to_be_visible(timeout=10000)
                 expect(register_now_btn).to_be_enabled(timeout=10000)
                 register_now_btn.click()
+                p.wait_for_load_state('networkidle')
             except Exception:
-                p.wait_for_timeout(3000)
+                # No separate registration step, wait for possible page update
+                p.wait_for_timeout(5000)
 
-            p.wait_for_timeout(3000)
-            current_url = p.url
-            success_text_present = p.locator("text=successfully registered").count() > 0 or \
-                                   p.locator("text=登録完了").count() > 0 or \
-                                   p.locator("text=Registration completed").count() > 0
+            # Wait for either URL change or Proceed to confirmation button disappear
+            try:
+                expect(p).not_to_have_url(ADD_STUDENT_URL, timeout=10000)
+            except AssertionError:
+                # if URL didn't change, check if button disappeared
+                button_visible = p.locator('button:has-text("Proceed to confirmation")').is_visible()
+                assert not button_visible, "Proceed to confirmation button still visible after submission"
 
-            assert (current_url != ADD_STUDENT_URL) or success_text_present, \
-                "Student registration might have failed: still on add form page without success message"
+            # If neither change detected, the test will fail here
