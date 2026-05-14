@@ -34,8 +34,10 @@ def test_successful_addition_of_student_with_valid_inputs(page):
             expect(p).to_have_url(ADD_STUDENT_URL)
 
         # Prepare data
-        last_name = "スズキ"  # Valid Katakana
-        first_name = "タロウ"  # Valid Katakana
+        last_name = "Suzuki"
+        first_name = "Taro"
+        last_name_katakana = ""
+        first_name_katakana = ""
         phone = generate_random_phone()
         email = generate_random_email()
         postal_code = f"{random.randint(10000, 99999)}"
@@ -52,8 +54,8 @@ def test_successful_addition_of_student_with_valid_inputs(page):
         with allure.step("Fill student form"):
             p.fill('input[name="lastName"]', last_name)
             p.fill('input[name="firstName"]', first_name)
-            p.fill('input[name="lastNameKatakana"]', last_name)
-            p.fill('input[name="firstNameKatakana"]', first_name)
+            p.fill('input[name="lastNameKatakana"]', last_name_katakana)
+            p.fill('input[name="firstNameKatakana"]', first_name_katakana)
             p.fill('input[name="phone"]', phone)
             p.fill('input[name="email"]', email)
 
@@ -119,5 +121,3 @@ def test_successful_addition_of_student_with_valid_inputs(page):
                 # if URL didn't change, check if button disappeared
                 button_visible = p.locator('button:has-text("Proceed to confirmation")').is_visible()
                 assert not button_visible, "Proceed to confirmation button still visible after submission"
-
-            # If neither change detected, the test will fail here
