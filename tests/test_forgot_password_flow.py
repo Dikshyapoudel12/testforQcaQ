@@ -4,31 +4,27 @@ from playwright.sync_api import expect
 
 
 @allure.feature("Forgot Password Flow")
-@allure.title("Send reset link with valid email address")
-def test_send_reset_link_with_valid_email(page):
+@allure.story("Sending reset link without email address")
+def test_sending_reset_link_without_email_address(page):
     base_url = "https://qcaq-dev.tai.com.np/signin"
-    test_email = "deekshyap@gmail.com"
 
     for p in page:
-        with allure.step("Navigate to signin page"):
+        with allure.step("Go to signin page"):
             p.goto(base_url)
 
         with allure.step("Click 'Forgot Password?' button"):
-            # Click button or link labeled 'Forgot Password?'
-            # Trying by text selector first
+            # Assuming the button/link text is exactly 'Forgot Password?'
             p.click("text=Forgot Password?")
 
-        with allure.step("Fill email field with valid email"):
-            p.fill('input[name="email"]', test_email)
-
-        with allure.step("Click 'Send Reset Link' button"):
-            # Assuming the button has text 'Send Reset Link'
+        with allure.step("Leave email field empty and click 'Send Reset Link' button"):
+            # Ensure the email input is empty
+            p.fill('input[name="email"]', '')
+            # Click Send Reset Link button - assuming button text
             p.click("text=Send Reset Link")
 
-        with allure.step("Wait for confirmation message 'Email sent successfully'"):
-            confirmation = p.locator("text=Email sent successfully")
-            expect(confirmation).to_be_visible(timeout=10000)  # 10 seconds timeout
-
-        # Optionally, assert final URL or other states here if needed
-
-        # Test ends here
+        with allure.step("Verify validation error message for required email"):
+            # Wait for validation error message to appear
+            # The exact message text to assert or selector to wait for is not specified.
+            # We will wait for an element containing text 'email is required' or similar.
+            # This can be adjusted according to actual UI messages.
+            expect(p.locator("text=email is required")).to_be_visible(timeout=5000)
