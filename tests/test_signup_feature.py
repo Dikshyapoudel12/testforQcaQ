@@ -35,8 +35,8 @@ def test_successful_signup_with_valid_data(page):
             if not filled:
                 raise Exception("Failed to fill the First Name field")
 
-        with allure.step("Fill Email Address with unique email"):
-            p.fill('input[name="email"]', unique_email)
+        with allure.step("Fill Email Address with unique email using get_by_placeholder"):
+            p.get_by_placeholder("Email Address").fill(unique_email)
 
         with allure.step("Fill Create Password"):
             p.fill('input[name="password"]', PASSWORD)
