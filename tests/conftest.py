@@ -24,6 +24,51 @@ QCAQ_TEST_SUITE_ID_LABEL = "qcaq_test_group_id"
 
 
 # -------------------------------
+# Allure ID Test Filtering
+# -------------------------------
+def pytest_addoption(parser):
+    """Register custom CLI options for QCAQ test execution."""
+    parser.addoption(
+        "--qcaq-allure-id",
+        action="store",
+        default=None,
+        help="Run only the test function decorated with @allure.id matching this UUID.",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Filter collected tests to only the one matching --qcaq-allure-id.
+
+    When running an individual test case from a unified group script,
+    this hook inspects each test function's @allure.id decorator and
+    deselects all tests that don't match the requested UUID.
+    """
+    target_id = config.getoption("--qcaq-allure-id", default=None)
+    if not target_id:
+        return
+
+    selected = []
+    deselected = []
+
+    for item in items:
+        # Check all allure labels/markers for matching id
+        allure_ids = set()
+        for marker in item.iter_markers("allure_label"):
+            if marker.kwargs.get("label_type") == "as_id":
+                if marker.args:
+                    allure_ids.add(marker.args[0])
+
+        if target_id in allure_ids:
+            selected.append(item)
+        else:
+            deselected.append(item)
+
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+    items[:] = selected
+
+
+# -------------------------------
 # Email Test Fixtures
 # -------------------------------
 
@@ -772,10 +817,6 @@ class EmailFetcher:
         return match.group(0) if match else None
 
 
-def pytest_addoption(parser):
-    pass
-
-
 # -------------------------------
 # Environment Variable Loading
 # -------------------------------
@@ -819,6 +860,8 @@ def playwright_instance():
 @pytest.fixture(scope="session")
 def browsers(playwright_instance, pytestconfig):
     browser_names = pytestconfig.getoption("--browser") or ["chromium"]
+    if isinstance(browser_names, str):
+        browser_names = [browser_names]
     slowmo = pytestconfig.getoption("--slowmo")
     launch_options = {
         "headless": False,
@@ -890,15 +933,22 @@ def pages(contexts):
 def _extract_uuid_path_parts(node_path: Path) -> tuple[str | None, str | None]:
     """Extract suite and test case UUIDs from the generated test file path."""
     parts = node_path.parts
+    # First, try to find two consecutive UUIDs (standard case-specific runs)
     for index in range(len(parts) - 1):
-        suite_candidate = parts[index]
-        test_case_candidate = parts[index + 1]
         try:
-            suite_id = str(UUID(suite_candidate))
-            test_case_id = str(UUID(test_case_candidate))
+            suite_id = str(UUID(parts[index]))
+            test_case_id = str(UUID(parts[index + 1]))
+            return suite_id, test_case_id
         except ValueError:
             continue
-        return suite_id, test_case_id
+
+    # If not found, check if the first part is a UUID (group-only runs, path: test_group_id/filename.py)
+    if parts:
+        try:
+            suite_id = str(UUID(parts[0]))
+            return suite_id, None
+        except ValueError:
+            pass
 
     return None, None
 
@@ -909,6 +959,15 @@ def inject_qcaq_allure_labels(request):
     suite_id, test_case_id = _extract_uuid_path_parts(Path(str(request.node.fspath)))
     if suite_id:
         allure.dynamic.label(QCAQ_TEST_SUITE_ID_LABEL, suite_id)
+
+    # If test_case_id was not in path (e.g. group-only run), extract it from request.node allure markers
+    if not test_case_id:
+        for marker in request.node.iter_markers("allure_label"):
+            if marker.kwargs.get("label_type") == "as_id":
+                if marker.args:
+                    test_case_id = str(marker.args[0])
+                    break
+
     if test_case_id:
         allure.dynamic.label(QCAQ_TEST_CASE_ID_LABEL, test_case_id)
 
@@ -959,67 +1018,69 @@ def pytest_runtest_makereport(item, call):
     if report.when == "call" and getattr(report, "failed", False):
         setattr(item, "_qcaq_test_failed", True)
 
-    if report.when == "call" and report.failed:
+    if report.when == "call":
         pages = item.funcargs.get("pages")
         if not pages:
             return
 
         nodeid = item.nodeid
+        status_label = "FAILURE" if report.failed else "SUCCESS"
         for browser_name, page in pages:
             try:
                 allure.attach(
                     page.screenshot(),
-                    name=f"FAILURE - {browser_name}",
+                    name=f"{status_label} - {browser_name}",
                     attachment_type=AttachmentType.PNG,
                 )
             except Exception as err:
                 print(f"Error due to exception in screenshot due to: {err}")
                 pass
 
-            try:
-                diagnostic = {
-                    "browser": browser_name,
-                    "url": page.url,
-                    "title": page.title(),
-                    "elements": page.evaluate("""() => {
-                        const elements = document.querySelectorAll(
-                            'input, textarea, select, button, a[href]'
-                        );
-                        return Array.from(elements).map(el => {
-                            const rect = el.getBoundingClientRect();
-                            return {
-                                tag: el.tagName.toLowerCase(),
-                                id: el.id || null,
-                                name: el.getAttribute('name') || null,
-                                type: el.getAttribute('type') || null,
-                                placeholder: el.placeholder || null,
-                                text: (el.textContent || '').trim().slice(0, 200),
-                                value: el.value || null,
-                                aria_label: el.getAttribute('aria-label') || null,
-                                class: Array.from(el.classList).slice(0, 3),
-                                href: el.href || null,
-                                role: el.getAttribute('role') || null,
-                                data_testid: el.getAttribute('data-testid') || null,
-                                visible: rect.width > 0 && rect.height > 0,
-                            };
-                        });
-                    }"""),
-                }
-
-                diag_dir = Path("./diagnostics")
-                diag_dir.mkdir(parents=True, exist_ok=True)
-                safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", nodeid)
-                diag_path = diag_dir / f"{safe_name}_dom.json"
-                diag_path.write_text(json.dumps(diagnostic, indent=2))
-            except Exception as diag_err:
+            if report.failed:
                 try:
+                    diagnostic = {
+                        "browser": browser_name,
+                        "url": page.url,
+                        "title": page.title(),
+                        "elements": page.evaluate("""() => {
+                            const elements = document.querySelectorAll(
+                                'input, textarea, select, button, a[href]'
+                            );
+                            return Array.from(elements).map(el => {
+                                const rect = el.getBoundingClientRect();
+                                return {
+                                    tag: el.tagName.toLowerCase(),
+                                    id: el.id || null,
+                                    name: el.getAttribute('name') || null,
+                                    type: el.getAttribute('type') || null,
+                                    placeholder: el.placeholder || null,
+                                    text: (el.textContent || '').trim().slice(0, 200),
+                                    value: el.value || null,
+                                    aria_label: el.getAttribute('aria-label') || null,
+                                    class: Array.from(el.classList).slice(0, 3),
+                                    href: el.href || null,
+                                    role: el.getAttribute('role') || null,
+                                    data_testid: el.getAttribute('data-testid') || null,
+                                    visible: rect.width > 0 && rect.height > 0,
+                                };
+                            });
+                        }"""),
+                    }
+
                     diag_dir = Path("./diagnostics")
                     diag_dir.mkdir(parents=True, exist_ok=True)
                     safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", nodeid)
                     diag_path = diag_dir / f"{safe_name}_dom.json"
-                    diag_path.write_text(json.dumps({"error": str(diag_err)}))
-                except Exception:
-                    pass
+                    diag_path.write_text(json.dumps(diagnostic, indent=2))
+                except Exception as diag_err:
+                    try:
+                        diag_dir = Path("./diagnostics")
+                        diag_dir.mkdir(parents=True, exist_ok=True)
+                        safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", nodeid)
+                        diag_path = diag_dir / f"{safe_name}_dom.json"
+                        diag_path.write_text(json.dumps({"error": str(diag_err)}))
+                    except Exception:
+                        pass
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -1055,6 +1116,16 @@ def pytest_runtest_teardown(item, nextitem):
 
 @pytest.fixture(scope="function")
 def page(pages):
+    """Return a single Playwright page for generated tests."""
+    if not pages:
+        msg = "No browser pages were created"
+        raise RuntimeError(msg)
+    return pages[0][1]
+
+
+@pytest.fixture(scope="function")
+def page_list(pages):
+    """Return all Playwright pages for multi-browser tests."""
     return [p for _, p in pages]
 
 
